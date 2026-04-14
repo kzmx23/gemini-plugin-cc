@@ -6,5 +6,17 @@
   "engines": {
     "node": ">=18.18.0"
   },
-  "license": "Apache-2.0"
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/sakibsadmanshajib/gemini-plugin-cc.git"
+  },
+  "keywords": [
+    "claude-code",
+    "claude-code-plugin",
+    "gemini",
+    "gemini-cli",
+    "code-review",
+    "ai-delegation"
+  ]
 }
