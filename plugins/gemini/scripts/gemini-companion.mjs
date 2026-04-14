@@ -21,7 +21,7 @@ import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
 
-import { parseArgs, splitRawArgumentString } from "./lib/args.mjs";
+import { parseCommandInput } from "./lib/args.mjs";
 import {
   buildPersistentTaskThreadName,
   DEFAULT_CONTINUE_PROMPT,
@@ -79,7 +79,7 @@ function printUsage() {
       "  node scripts/gemini-companion.mjs setup [--enable-review-gate|--disable-review-gate] [--json]",
       "  node scripts/gemini-companion.mjs review [--wait|--background] [--base <ref>] [--scope <auto|working-tree|branch>]",
       "  node scripts/gemini-companion.mjs adversarial-review [--wait|--background] [--base <ref>] [--scope <auto|working-tree|branch>] [--model <name>] [focus text...]",
-      "  node scripts/gemini-companion.mjs task [--write] [--model <name>] [--thinking-budget <n>] [--approval-mode <mode>] [--background|--wait] [--resume-last] [--json] -- <prompt>",
+      "  node scripts/gemini-companion.mjs task [--write] [--model <name>] [--approval-mode <mode>] [--background|--wait] [--resume-last] [--json] -- <prompt>",
       "  node scripts/gemini-companion.mjs task-worker <job-id>",
       "  node scripts/gemini-companion.mjs status [job-id] [--wait] [--timeout-ms <ms>] [--all] [--json]",
       "  node scripts/gemini-companion.mjs result [job-id] [--json]",
@@ -103,7 +103,7 @@ function resolveModel(value) {
 // ─── Setup ────────────────────────────────────────────────────────────────────
 
 async function handleSetup(argv) {
-  const { options } = parseArgs(argv, {
+  const { options } = parseCommandInput(argv, {
     booleanOptions: ["json", "enable-review-gate", "disable-review-gate"]
   });
 
@@ -150,7 +150,7 @@ async function handleSetup(argv) {
 // ─── Review ───────────────────────────────────────────────────────────────────
 
 async function handleReview(argv) {
-  const { options } = parseArgs(argv, {
+  const { options } = parseCommandInput(argv, {
     valueOptions: ["base", "scope", "model", "cwd"],
     booleanOptions: ["json", "wait", "background"]
   });
@@ -186,7 +186,7 @@ async function handleReview(argv) {
 // ─── Adversarial Review ───────────────────────────────────────────────────────
 
 async function handleReviewCommand(argv, { reviewName }) {
-  const { options, positionals } = parseArgs(argv, {
+  const { options, positionals } = parseCommandInput(argv, {
     valueOptions: ["base", "scope", "model", "cwd"],
     booleanOptions: ["json", "wait", "background"]
   });
@@ -223,8 +223,8 @@ async function handleReviewCommand(argv, { reviewName }) {
 // ─── Task ─────────────────────────────────────────────────────────────────────
 
 async function handleTask(argv) {
-  const { options, positionals } = parseArgs(argv, {
-    valueOptions: ["model", "thinking-budget", "approval-mode", "cwd"],
+  const { options, positionals } = parseCommandInput(argv, {
+    valueOptions: ["model", "approval-mode", "cwd"],
     booleanOptions: ["json", "write", "background", "wait", "resume-last"]
   });
 
@@ -239,8 +239,7 @@ async function handleTask(argv) {
   }
 
   const model = resolveModel(options.model);
-  const thinkingBudget = options["thinking-budget"] ? Number(options["thinking-budget"]) : undefined;
-  const approvalMode = options.write ? "auto_edit" : (options["approval-mode"] ?? "auto_edit");
+  const approvalMode = options.write ? "auto_edit" : (options["approval-mode"] ?? "default");
 
   // Handle resume.
   let prompt = taskText || DEFAULT_CONTINUE_PROMPT;
@@ -259,7 +258,6 @@ async function handleTask(argv) {
     return runTaskInBackground(workspaceRoot, {
       prompt,
       model,
-      thinkingBudget,
       approvalMode,
       sessionId,
       json: options.json
@@ -336,16 +334,33 @@ async function handleTaskWorker(argv) {
   }
 
   const request = storedJob.request ?? {};
+  const jobKind = storedJob.kind ?? "task";
 
   try {
     await runTrackedJob(storedJob, async () => {
       updateJobPhase(workspaceRoot, jobId, "running");
 
-      const result = await runAcpPrompt(cwd, request.prompt, {
-        model: request.model,
-        approvalMode: request.approvalMode ?? "auto_edit",
-        sessionId: request.sessionId
-      });
+      let result;
+      if (jobKind === "review") {
+        result = await runAcpReview(cwd, {
+          scope: request.scope,
+          base: request.base,
+          model: request.model
+        });
+      } else if (jobKind === "adversarial-review") {
+        result = await runAcpAdversarialReview(cwd, {
+          scope: request.scope,
+          base: request.base,
+          model: request.model,
+          focus: request.focus
+        });
+      } else {
+        result = await runAcpPrompt(cwd, request.prompt, {
+          model: request.model,
+          approvalMode: request.approvalMode ?? "default",
+          sessionId: request.sessionId
+        });
+      }
 
       if (result.error) {
         throw result.error;
@@ -375,7 +390,7 @@ async function handleTaskWorker(argv) {
 // ─── Status ───────────────────────────────────────────────────────────────────
 
 async function handleStatus(argv) {
-  const { options, positionals } = parseArgs(argv, {
+  const { options, positionals } = parseCommandInput(argv, {
     valueOptions: ["timeout-ms", "cwd"],
     booleanOptions: ["json", "wait", "all"]
   });
@@ -424,7 +439,7 @@ async function waitForActiveJobs(cwd, timeoutMs, json) {
 // ─── Result ───────────────────────────────────────────────────────────────────
 
 function handleResult(argv) {
-  const { options, positionals } = parseArgs(argv, {
+  const { options, positionals } = parseCommandInput(argv, {
     valueOptions: ["cwd"],
     booleanOptions: ["json"]
   });
@@ -449,7 +464,7 @@ function handleResult(argv) {
 // ─── Cancel ───────────────────────────────────────────────────────────────────
 
 async function handleCancel(argv) {
-  const { options, positionals } = parseArgs(argv, {
+  const { options, positionals } = parseCommandInput(argv, {
     valueOptions: ["cwd"],
     booleanOptions: ["json"]
   });
@@ -506,7 +521,7 @@ async function handleCancel(argv) {
 // ─── Resume Candidate ─────────────────────────────────────────────────────────
 
 async function handleTaskResumeCandidate(argv) {
-  const { options } = parseArgs(argv, {
+  const { options } = parseCommandInput(argv, {
     valueOptions: ["cwd"],
     booleanOptions: ["json"]
   });
