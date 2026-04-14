@@ -1,18 +1,26 @@
-# Gemini plugin for Claude Code
+# Gemini Plugin for Claude Code
 
 Use Google's [Gemini CLI](https://github.com/google-gemini/gemini-cli) from inside [Claude Code](https://docs.anthropic.com/en/docs/claude-code) to review code or delegate tasks.
 
+> **Origin:** This plugin is a port of [codex-plugin-cc](https://github.com/sakibsadmanshajib/codex-plugin-cc), adapted from OpenAI's Codex App Server Protocol to Google's ACP (Agent Client Protocol). See [Differences from codex-plugin-cc](#differences-from-codex-plugin-cc) for details.
+
 ## What You Get
 
-- `/gemini:review` for a normal read-only Gemini review
-- `/gemini:adversarial-review` for a steerable challenge review
-- `/gemini:rescue`, `/gemini:status`, `/gemini:result`, and `/gemini:cancel` to delegate work and manage background jobs
+| Command | Purpose |
+|---------|---------|
+| `/gemini:review` | Read-only Gemini code review |
+| `/gemini:adversarial-review` | Steerable challenge review |
+| `/gemini:rescue` | Delegate a task to Gemini |
+| `/gemini:status` | List active and recent jobs |
+| `/gemini:result` | Show full output for a finished job |
+| `/gemini:cancel` | Cancel an active background job |
+| `/gemini:setup` | Check install, auth, and toggle review gate |
 
 ## Requirements
 
-- **Google account or Gemini API key.**
-  - Sign in with Google (free tier: 60 req/min, 1,000 req/day) or set `GEMINI_API_KEY` from [AI Studio](https://aistudio.google.com/apikey).
 - **Node.js 18.18 or later**
+- **Google account or Gemini API key**
+  - Sign in with Google (free tier: 60 req/min, 1,000 req/day) or set `GEMINI_API_KEY` from [AI Studio](https://aistudio.google.com/apikey).
 
 ## Install
 
@@ -52,8 +60,7 @@ If Gemini CLI is installed but not authenticated, run `!gemini` in Claude Code t
 
 Runs a Gemini review on your current work.
 
-> [!NOTE]
-> Code review especially for multi-file changes might take a while. It's generally recommended to run it in the background.
+> **Note:** Code review especially for multi-file changes might take a while. It's generally recommended to run it in the background.
 
 Use it when you want:
 
@@ -108,8 +115,7 @@ Use it when you want Gemini to:
 - continue a previous Gemini task
 - take a faster or cheaper pass with a smaller model
 
-> [!NOTE]
-> Depending on the task and the model you choose these tasks might take a long time and it's generally recommended to force the task to be in the background or move the agent to the background.
+> **Note:** Depending on the task and the model you choose these tasks might take a long time and it's generally recommended to force the task to be in the background or move the agent to the background.
 
 It supports `--background`, `--wait`, `--resume`, and `--fresh`. If you omit `--resume` and `--fresh`, the plugin can offer to continue the latest rescue thread for this repo.
 
@@ -181,8 +187,7 @@ You can also use `/gemini:setup` to manage the optional review gate.
 
 When the review gate is enabled, the plugin uses a `Stop` hook to run a targeted Gemini review based on Claude's response. If that review finds issues, the stop is blocked so Claude can address them first.
 
-> [!WARNING]
-> The review gate can create a long-running Claude/Gemini loop and may drain usage limits quickly. Only enable it when you plan to actively monitor the session.
+> **Warning:** The review gate can create a long-running Claude/Gemini loop and may drain usage limits quickly. Only enable it when you plan to actively monitor the session.
 
 ## Typical Flows
 
@@ -204,6 +209,34 @@ When the review gate is enabled, the plugin uses a `Stop` hook to run a targeted
 /gemini:rescue --background redesign the error handling across the API layer
 /gemini:status
 ```
+
+## Differences from codex-plugin-cc
+
+This plugin is a port of [codex-plugin-cc](https://github.com/sakibsadmanshajib/codex-plugin-cc), which wraps OpenAI's Codex CLI. The two plugins share the same command interface and plugin structure, but differ in how they communicate with their respective AI backends.
+
+### Protocol
+
+| Aspect | codex-plugin-cc | gemini-plugin-cc |
+|--------|----------------|-----------------|
+| **Backend CLI** | `codex` (OpenAI Codex CLI) | `gemini` (Google Gemini CLI) |
+| **Protocol** | App Server Protocol (ASP) — HTTP REST with SSE streaming | Agent Client Protocol (ACP) — JSON-RPC 2.0 over stdio |
+| **Connection** | HTTP server (`codex --app-server`) | Persistent broker over Unix socket (`gemini --acp`) |
+| **Session management** | Thread-based (`thread/start`, `thread/cancel`) | Session-based (`session/new`, `session/set_mode`) |
+| **Write control** | `sandbox: "workspace-write"` vs `"read-only"` | `approvalMode: "auto_edit"` vs `"default"` |
+| **Model effort** | `--effort` parameter (none → xhigh) | Not available via ACP (use `--model` instead) |
+| **Streaming** | SSE events from HTTP endpoint | JSON-RPC notifications over stdio |
+
+### What this means in practice
+
+- **Same commands**: Both plugins expose identical slash commands (`review`, `adversarial-review`, `rescue`, `status`, `result`, `cancel`, `setup`).
+- **Same review logic**: Diff collection, untracked file reading, branch comparison, and prompt construction are shared.
+- **Different transport**: Codex uses an HTTP app server with SSE streaming. Gemini uses a JSON-RPC broker over Unix sockets. The broker keeps a persistent `gemini --acp` child process alive for the session.
+- **No effort parameter**: Codex supports `--effort` to control thinking budget. Gemini CLI does not expose an equivalent via ACP, so this plugin uses `--model` selection instead.
+- **Authentication**: Codex uses ChatGPT accounts or OpenAI API keys. Gemini uses Google accounts or Gemini API keys from AI Studio.
+
+### Why a port instead of a fork?
+
+The codex plugin's architecture (command definitions, job tracking, state persistence, background workers, review prompt construction) is protocol-agnostic. Porting it to Gemini required replacing only the transport layer (`acp-client.mjs`, `acp-broker.mjs`) and the prompt execution functions in `gemini.mjs`, while keeping everything else intact.
 
 ## Gemini Integration
 
@@ -251,6 +284,20 @@ Check out the [Gemini CLI docs](https://github.com/google-gemini/gemini-cli) for
 
 Delegated tasks and any review gate runs can be directly resumed inside Gemini by running `gemini --resume` with the session ID from `/gemini:result` or `/gemini:status`.
 
+## Architecture
+
+```
+Claude Code ──[Bash]──> gemini-companion.mjs ──[Unix socket]──> ACP Broker
+                                                                    |
+                                                              gemini --acp
+                                                              (persistent)
+```
+
+- **gemini-companion.mjs** — Main CLI handling all subcommands
+- **acp-broker.mjs** — Persistent daemon multiplexing JSON-RPC requests via Unix socket
+- **acp-client.mjs** — Client with broker-first, direct-spawn fallback
+- **lib modules** — Git context, state persistence, job tracking, rendering
+
 ## FAQ
 
 ### Do I need a separate Gemini account for this plugin?
@@ -270,20 +317,6 @@ Yes. The plugin inherits your `~/.gemini/settings.json` and any project-level `.
 ### Can I keep using my current API key or Vertex AI setup?
 
 Yes. Because the plugin uses your local Gemini CLI, your existing authentication method and config still apply. If you use Vertex AI, ensure `GOOGLE_CLOUD_PROJECT` and `GOOGLE_CLOUD_LOCATION` are set.
-
-## Architecture
-
-```
-Claude Code ──[Bash]──> gemini-companion.mjs ──[Unix socket]──> ACP Broker
-                                                                    |
-                                                              gemini --acp
-                                                              (persistent)
-```
-
-- **gemini-companion.mjs** — Main CLI handling all subcommands
-- **acp-broker.mjs** — Persistent daemon multiplexing JSON-RPC requests via Unix socket
-- **acp-client.mjs** — Client with broker-first, direct-spawn fallback
-- **15 lib modules** — Git context, state persistence, job tracking, rendering
 
 ## License
 
