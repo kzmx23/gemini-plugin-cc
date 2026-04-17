@@ -31,7 +31,7 @@ Steps 1–2 run in your **terminal**. Steps 3–4 run **inside a Claude Code ses
 ### 1. Add the marketplace (terminal)
 
 ```bash
-claude plugin marketplace add sakibsadmanshajib/gemini-plugin-cc
+claude plugin marketplace add kzmx23/gemini-plugin-cc
 ```
 
 ### 2. Install the plugin (terminal)
@@ -329,8 +329,8 @@ Yes. Because the plugin uses your local Gemini CLI, your existing authentication
 | Core commands (`review`, `rescue`, `status`, `result`, `cancel`) | Working |
 | Background jobs + broker persistence | Working |
 | Review gate (`/gemini:setup --enable-review-gate`) | Working — see warning in docs |
-| Scope validation (`--scope` flag) | [Known bug #1](https://github.com/sakibsadmanshajib/gemini-plugin-cc/issues/1) — falls through to default silently |
-| Protocol method mismatch edge cases | [Known bug #2](https://github.com/sakibsadmanshajib/gemini-plugin-cc/issues/2) |
+| Scope validation (`--scope` flag) | [Known bug #1](https://github.com/kzmx23/gemini-plugin-cc/issues/1) — falls through to default silently |
+| Protocol method mismatch edge cases | [Known bug #2](https://github.com/kzmx23/gemini-plugin-cc/issues/2) |
 | Windows (Native) and macOS | Untested |
 | WSL and Linux | Tested |
 | `GEMINI_API_KEY` auth | Untested |
